@@ -1,3 +1,9 @@
+//! Display module for:
+//! - AK400 DIGITAL
+//! - AK500 DIGITAL
+//! - AK500S DIGITAL
+//! - AK620 DIGITAL
+
 use crate::{devices::AUTO_MODE_INTERVAL, monitor::cpu::Cpu};
 use super::{device_error, Mode};
 use hidapi::HidApi;
@@ -8,15 +14,15 @@ pub const TEMP_LIMIT_C: u8 = 90;
 pub const TEMP_LIMIT_F: u8 = 194;
 
 pub struct Display {
+    cpu: Cpu,
     pub mode: Mode,
     update: Duration,
     fahrenheit: bool,
     alarm: bool,
-    cpu: Cpu,
 }
 
 impl Display {
-    pub fn new(mode: &Mode, update: Duration, fahrenheit: bool, alarm: bool) -> Self {
+    pub fn new(cpu: Cpu, mode: &Mode, update: Duration, fahrenheit: bool, alarm: bool) -> Self {
         // Verify the display mode
         let mode = match mode {
             Mode::Default => DEFAULT_MODE,
@@ -27,17 +33,20 @@ impl Display {
         };
 
         Display {
+            cpu,
             mode,
             update,
             fahrenheit,
             alarm,
-            cpu: Cpu::new(),
         }
     }
 
     pub fn run(&self, api: &HidApi, vid: u16, pid: u16) {
         // Connect to device
         let device = api.open(vid, pid).unwrap_or_else(|_| device_error());
+
+        // Display warning if a required module is missing
+        self.cpu.warn_temp();
 
         // Data packet
         let mut data: [u8; 64] = [0; 64];

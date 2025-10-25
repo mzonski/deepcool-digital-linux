@@ -1,3 +1,6 @@
+//! Display module for:
+//! - CH510 MESH DIGITAL
+
 use crate::monitor::{cpu::Cpu, gpu::Gpu};
 use super::{device_error, Mode};
 use hidapi::HidApi;
@@ -6,15 +9,15 @@ use std::{thread::sleep, time::Duration};
 pub const DEFAULT_MODE: Mode = Mode::Cpu;
 
 pub struct Display {
+    cpu: Cpu,
+    gpu: Gpu,
     pub mode: Mode,
     update: Duration,
     fahrenheit: bool,
-    cpu: Cpu,
-    gpu: Gpu,
 }
 
 impl Display {
-    pub fn new(mode: &Mode, update: Duration, fahrenheit: bool) -> Self {
+    pub fn new(cpu: Cpu, gpu: Gpu, mode: &Mode, update: Duration, fahrenheit: bool) -> Self {
         // Verify the display mode
         let mode = match mode {
             Mode::Default => DEFAULT_MODE,
@@ -24,17 +27,24 @@ impl Display {
         };
 
         Display {
+            cpu,
+            gpu,
             mode,
             update,
             fahrenheit,
-            cpu: Cpu::new(),
-            gpu: Gpu::new(),
         }
     }
 
     pub fn run(&self, api: &HidApi, vid: u16, pid: u16) {
         // Connect to device
         let device = api.open(vid, pid).unwrap_or_else(|_| device_error());
+
+        // Display warning if a required module is missing
+        match self.mode {
+            Mode::Cpu => self.cpu.warn_temp(),
+            Mode::Gpu => self.gpu.warn_missing(),
+            _ => (),
+        }
 
         // Get temperature unit
         let unit = if self.fahrenheit { "F" } else { "C" };

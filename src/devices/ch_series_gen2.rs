@@ -1,20 +1,25 @@
-use crate::{error, monitor::{cpu::Cpu, gpu::Gpu}};
+//! Display module for:
+//! - CH170 DIGITAL
+//! - CH270 DIGITAL
+//! - CH690 DIGITAL
+
+use crate::{monitor::{cpu::Cpu, gpu::Gpu}, warning};
 use super::{device_error, Mode, AUTO_MODE_INTERVAL};
 use hidapi::HidApi;
-use std::{process::exit, thread::sleep, time::{Duration, Instant}};
+use std::{thread::sleep, time::{Duration, Instant}};
 
 pub const DEFAULT_MODE: Mode = Mode::CpuFrequency;
 
 pub struct Display {
+    cpu: Cpu,
+    gpu: Gpu,
     pub mode: Mode,
     update: Duration,
     fahrenheit: bool,
-    cpu: Cpu,
-    gpu: Gpu,
 }
 
 impl Display {
-    pub fn new(mode: &Mode, update: Duration, fahrenheit: bool) -> Self {
+    pub fn new(cpu: Cpu, gpu: Gpu, mode: &Mode, update: Duration, fahrenheit: bool) -> Self {
         // Verify the display mode
         let mode = match mode {
             Mode::Default => DEFAULT_MODE,
@@ -27,11 +32,11 @@ impl Display {
         };
 
         Display {
+            cpu,
+            gpu,
             mode,
             update,
             fahrenheit,
-            cpu: Cpu::new(),
-            gpu: Gpu::new(),
         }
     }
 
@@ -39,10 +44,21 @@ impl Display {
         // Connect to device
         let device = api.open(vid, pid).unwrap_or_else(|_| device_error());
 
-        // Check if `rapl_max_uj` was read correctly
-        if matches!(self.mode, Mode::CpuFrequency | Mode::CpuFan | Mode::Auto) && self.cpu.rapl_max_uj == 0 {
-            error!("Failed to get CPU power details");
-            exit(1);
+        // Display warning to address limitated display modes
+        match self.mode {
+            Mode::CpuFan => { warning!("CPU fan speed monitoring is not yet supported"); }
+            Mode::Psu => { warning!("PSU monitoring is not yet supported"); }
+            Mode::Auto => { warning!("Display mode \"auto\" only cycles between fully supported modes"); }
+            _ => (),
+        }
+
+        // Display warning if a required module is missing
+        if matches!(self.mode, Mode::CpuFrequency | Mode::CpuFan | Mode::Auto) {
+            self.cpu.warn_temp();
+            self.cpu.warn_rapl();
+        }
+        if matches!(self.mode, Mode::Gpu | Mode::Auto) {
+            self.gpu.warn_missing();
         }
 
         // Data packet

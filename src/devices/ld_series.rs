@@ -1,7 +1,11 @@
-use crate::{error, monitor::cpu::Cpu};
+//! Display module for:
+//! - LD240
+//! - LD360
+
+use crate:: monitor::cpu::Cpu;
 use super::{device_error, Mode};
 use hidapi::HidApi;
-use std::{process::exit, thread::sleep, time::Duration};
+use std::{thread::sleep, time::Duration};
 
 pub const DEFAULT_MODE: Mode = Mode::Auto;
 // The temperature limits are hard-coded in the device
@@ -9,17 +13,17 @@ pub const TEMP_LIMIT_C: u8 = 85;
 pub const TEMP_LIMIT_F: u8 = 185;
 
 pub struct Display {
+    cpu: Cpu,
     update: Duration,
     fahrenheit: bool,
-    cpu: Cpu,
 }
 
 impl Display {
-    pub fn new(update: Duration, fahrenheit: bool) -> Self {
+    pub fn new(cpu: Cpu, update: Duration, fahrenheit: bool) -> Self {
         Display {
+            cpu,
             update,
             fahrenheit,
-            cpu: Cpu::new(),
         }
     }
 
@@ -27,11 +31,9 @@ impl Display {
         // Connect to device
         let device = api.open(vid, pid).unwrap_or_else(|_| device_error());
 
-        // Check if `rapl_max_uj` was read correctly
-        if self.cpu.rapl_max_uj == 0 {
-            error!("Failed to get CPU power details");
-            exit(1);
-        }
+        // Display warning if a required module is missing
+        self.cpu.warn_temp();
+        self.cpu.warn_rapl();
 
         // Data packet
         let mut data: [u8; 64] = [0; 64];

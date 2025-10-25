@@ -1,22 +1,26 @@
-use crate::{error, monitor::cpu::Cpu};
+//! Display module for:
+//! - LS520 SE DIGITAL
+//! - LS720 SE DIGITAL
+
+use crate::monitor::cpu::Cpu;
 use super::{device_error, Mode, AUTO_MODE_INTERVAL};
 use hidapi::HidApi;
-use std::{process::exit, thread::sleep, time::{Duration, Instant}};
+use std::{thread::sleep, time::{Duration, Instant}};
 
 pub const DEFAULT_MODE: Mode = Mode::CpuTemperature;
 pub const TEMP_LIMIT_C: u8 = 90;
 pub const TEMP_LIMIT_F: u8 = 194;
 
 pub struct Display {
+    cpu: Cpu,
     pub mode: Mode,
     update: Duration,
     fahrenheit: bool,
     alarm: bool,
-    cpu: Cpu,
 }
 
 impl Display {
-    pub fn new(mode: &Mode, update: Duration, fahrenheit: bool, alarm: bool) -> Self {
+    pub fn new(cpu: Cpu, mode: &Mode, update: Duration, fahrenheit: bool, alarm: bool) -> Self {
         // Verify the display mode
         let mode = match mode {
             Mode::Default => DEFAULT_MODE,
@@ -27,11 +31,11 @@ impl Display {
         };
 
         Display {
+            cpu,
             mode,
             update,
             fahrenheit,
             alarm,
-            cpu: Cpu::new(),
         }
     }
 
@@ -39,11 +43,9 @@ impl Display {
         // Connect to device
         let device = api.open(vid, pid).unwrap_or_else(|_| device_error());
 
-        // Check if `rapl_max_uj` was read correctly
-        if self.cpu.rapl_max_uj == 0 {
-            error!("Failed to get CPU power details");
-            exit(1);
-        }
+        // Display warning if a required module is missing
+        self.cpu.warn_temp();
+        self.cpu.warn_rapl();
 
         // Data packet
         let mut data: [u8; 64] = [0; 64];

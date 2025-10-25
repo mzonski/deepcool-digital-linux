@@ -1,8 +1,12 @@
-use crate::{error, monitor::{cpu::Cpu, gpu::Gpu}};
+//! Display module for:
+//! - LP240
+//! - LP360
+
+use crate::monitor::{cpu::Cpu, gpu::Gpu};
 use super::{device_error, Mode};
 use cpu_monitor::CpuInstant;
 use hidapi::HidApi;
-use std::{process::exit, thread::sleep, time::Duration};
+use std::{thread::sleep, time::Duration};
 
 /// Helper module for the LP Series.
 mod dot_matrix {
@@ -147,6 +151,38 @@ mod dot_matrix {
         }
     }
 
+    /// Rotates the matrix values by a given degree.
+    pub fn rotate_matrix(matrix: &mut [[bool; 14]; 14], degrees: u16) {
+        let mut rotated = [[false; 14]; 14];
+        match degrees {
+            90 => {
+                for i in 0..14 {
+                    for j in 0..14 {
+                        rotated[j][13 - i] = matrix[i][j];
+                    }
+                }
+            }
+            180 => {
+                for i in 0..14 {
+                    for j in 0..14 {
+                        rotated[13 - i][13 - j] = matrix[i][j];
+                    }
+                }
+            }
+            270 => {
+                for i in 0..14 {
+                    for j in 0..14 {
+                        rotated[13 - j][i] = matrix[i][j];
+                    }
+                }
+            }
+            _ => {
+                return;
+            }
+        }
+        *matrix = rotated;
+    }
+
     /// Converts the 14x14 matrix to be data bytes.
     pub fn matrix_to_bytes(matrix: [[bool; 14]; 14]) -> [u8; 28] {
         let mut bytes: [u8; 28] = [0; 28];
@@ -183,16 +219,17 @@ mod dot_matrix {
 pub const DEFAULT_MODE: Mode = Mode::CpuUsage;
 
 pub struct Display {
+    cpu: Cpu,
+    gpu: Gpu,
     pub mode: Mode,
     pub secondary: Option<Mode>,
     update: Duration,
     fahrenheit: bool,
-    cpu: Cpu,
-    gpu: Gpu,
+    rotate: u16,
 }
 
 impl Display {
-    pub fn new(mode: &Mode, secondary: &Mode, update: Duration, fahrenheit: bool) -> Self {
+    pub fn new(cpu: Cpu, gpu: Gpu, mode: &Mode, secondary: &Mode, update: Duration, fahrenheit: bool, rotate: u16) -> Self {
         // Verify the display mode
         let mode = match mode {
             Mode::Default => DEFAULT_MODE,
@@ -217,12 +254,13 @@ impl Display {
         };
 
         Display {
+            cpu,
+            gpu,
             mode,
             secondary,
             update,
             fahrenheit,
-            cpu: Cpu::new(),
-            gpu: Gpu::new(),
+            rotate,
         }
     }
 
@@ -230,10 +268,18 @@ impl Display {
         // Connect to device
         let device = api.open(vid, pid).unwrap_or_else(|_| device_error());
 
-        // Check if `rapl_max_uj` was read correctly
-        if self.cpu.rapl_max_uj == 0 {
-            error!("Failed to get CPU power details");
-            exit(1);
+        // Display warning if a required module is missing
+        if matches!(self.mode, Mode::CpuTemperature) || matches!(self.secondary, Some(Mode::CpuTemperature)) {
+            self.cpu.warn_temp();
+        }
+        if matches!(self.mode, Mode::CpuPower) || matches!(self.secondary, Some(Mode::CpuPower)) {
+            self.cpu.warn_rapl();
+        }
+        if
+            matches!(self.mode, Mode::GpuUsage | Mode::GpuTemperature | Mode::GpuPower) ||
+            matches!(self.secondary, Some(Mode::GpuUsage) | Some(Mode::GpuTemperature) | Some(Mode::GpuPower))
+        {
+            self.gpu.warn_missing();
         }
 
         // Data packet
@@ -269,7 +315,7 @@ impl Display {
                         8,
                         self.get_system_info(secondary, cpu_instant, cpu_energy)
                     );
-                },
+                }
                 None => {
                     self.insert_data_to_matrix(
                         &mut matrix,
@@ -277,6 +323,9 @@ impl Display {
                         self.get_system_info(&self.mode, cpu_instant, cpu_energy)
                     );
                 }
+            }
+            if self.rotate > 0 {
+                dot_matrix::rotate_matrix(&mut matrix, self.rotate);
             }
             status_data[6..=33].copy_from_slice(&dot_matrix::matrix_to_bytes(matrix));
 

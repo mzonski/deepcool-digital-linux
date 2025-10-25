@@ -1,3 +1,9 @@
+//! Display module for:
+//! - AG300 DIGITAL
+//! - AG400 DIGITAL
+//! - AG500 DIGITAL
+//! - AG620 DIGITAL
+
 use crate::monitor::cpu::Cpu;
 use super::{device_error, Mode, AUTO_MODE_INTERVAL};
 use hidapi::HidApi;
@@ -7,14 +13,14 @@ pub const DEFAULT_MODE: Mode = Mode::CpuTemperature;
 pub const TEMP_LIMIT_C: u8 = 90;
 
 pub struct Display {
+    cpu: Cpu,
     pub mode: Mode,
     update: Duration,
     alarm: bool,
-    cpu: Cpu,
 }
 
 impl Display {
-    pub fn new(mode: &Mode, update: Duration, alarm: bool) -> Self {
+    pub fn new(cpu: Cpu, mode: &Mode, update: Duration, alarm: bool) -> Self {
         // Verify the display mode
         let mode = match mode {
             Mode::Default => DEFAULT_MODE,
@@ -25,16 +31,19 @@ impl Display {
         };
 
         Display {
+            cpu,
             mode,
             update,
             alarm,
-            cpu: Cpu::new(),
         }
     }
 
     pub fn run(&self, api: &HidApi, vid: u16, pid: u16) {
         // Connect to device
         let device = api.open(vid, pid).unwrap_or_else(|_| device_error());
+
+        // Display warning if a required module is missing
+        self.cpu.warn_temp();
 
         // Data packet
         let mut data: [u8; 64] = [0; 64];
